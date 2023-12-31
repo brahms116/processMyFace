@@ -28,10 +28,6 @@ instance Show RunningTask where
 
 data Action = AddTask Task deriving (Show)
 
--- pTask :: [String] -> Task
--- pTask (name : cmd : d : _) = Task {tName = name, tCommand = cmd, tCwd = d}
--- pTask s = error ("bad parse: " ++ show s)
-
 pTask :: String -> Either String Task
 pTask s = case words s of
   [name, cmd, d] -> Right $ Task {tName = name, tCommand = cmd, tCwd = d}
@@ -92,7 +88,7 @@ addTask t =
                   std_err = UseHandle hFile
                 }
         _ <- lift $ addTaskToState t ph
-        undefined
+        return $ "Added task: " ++ tName t
 
 -- menu :: IO Action
 
