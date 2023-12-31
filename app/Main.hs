@@ -1,6 +1,7 @@
 module Main (main) where
 
 import Control.Concurrent
+import Control.Monad.Except
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.State.Lazy
 import System.Environment
@@ -13,6 +14,17 @@ data Task = Task
     tCwd :: String
   }
   deriving (Show)
+
+data RunningTask = RuningTask
+  { rtName :: String,
+    rtCommand :: String,
+    rtCwd :: String,
+    rtPh :: ProcessHandle,
+    rtFp :: String
+  }
+
+instance Show RunningTask where
+  show = rtName
 
 data Action = AddTask Task deriving (Show)
 
@@ -41,11 +53,46 @@ prompt = do
     Right action -> return action
     Left str -> putStrLn str >> prompt
 
-menu :: StateT [Task] IO Action
+menu :: StateT [RunningTask] IO Action
 menu = do
   cur <- get
   lift $ print cur
   lift prompt
+
+validateTask :: Task -> [RunningTask] -> Either String ()
+validateTask t ts =
+  let name = tName t
+      dup = any (\x -> name == rtName x) ts
+   in if dup then pure () else Left $ "Duplicate task name: " ++ name
+
+runValidateTask :: Task -> ExceptT String (StateT [RunningTask] IO) ()
+runValidateTask t = do
+  ts <- lift get
+  case validateTask t ts of
+    Left err -> throwError err
+    Right _ -> return ()
+
+addTaskToState :: Task -> ProcessHandle -> StateT [RunningTask] a ()
+addTaskToState = undefined
+
+addTask :: Task -> ExceptT String (StateT [RunningTask] IO) String
+addTask t =
+  let doIO = lift . lift
+      command = shell (tCommand t)
+   in do
+        _ <- runValidateTask t
+        hFile <- doIO $ openFile ("/tmp/" ++ tName t) WriteMode
+        -- dunno if I need to set the buffering mode
+        (_, _, _, ph) <-
+          doIO $
+            createProcess
+              command
+                { cwd = Just $ tCwd t,
+                  std_out = UseHandle hFile,
+                  std_err = UseHandle hFile
+                }
+        _ <- lift $ addTaskToState t ph
+        undefined
 
 -- menu :: IO Action
 
