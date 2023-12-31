@@ -15,7 +15,7 @@ data Task = Task
   }
   deriving (Show)
 
-data RunningTask = RuningTask
+data RunningTask = RunningTask
   { rtName :: String,
     rtCommand :: String,
     rtCwd :: String,
@@ -59,7 +59,7 @@ validateTask :: Task -> [RunningTask] -> Either String ()
 validateTask t ts =
   let name = tName t
       dup = any (\x -> name == rtName x) ts
-   in if dup then pure () else Left $ "Duplicate task name: " ++ name
+   in when dup $ Left $ "Duplicate task name: " ++ name
 
 runValidateTask :: Task -> ExceptT String (StateT [RunningTask] IO) ()
 runValidateTask t = do
@@ -68,16 +68,22 @@ runValidateTask t = do
     Left err -> throwError err
     Right _ -> return ()
 
-addTaskToState :: Task -> ProcessHandle -> StateT [RunningTask] a ()
-addTaskToState = undefined
+addTaskToState :: (Monad a) => Task -> String -> ProcessHandle -> StateT [RunningTask] a ()
+addTaskToState (Task name command d) fp ph =
+  let rt = RunningTask {rtFp = fp, rtPh = ph, rtName = name, rtCommand = command, rtCwd = d}
+   in do
+        -- explore why a has to be a monad?
+        cur <- get
+        put $ rt : cur
 
 addTask :: Task -> ExceptT String (StateT [RunningTask] IO) String
 addTask t =
   let doIO = lift . lift
       command = shell (tCommand t)
+      filename = "/tmp/" ++ tName t
    in do
         _ <- runValidateTask t
-        hFile <- doIO $ openFile ("/tmp/" ++ tName t) WriteMode
+        hFile <- doIO $ openFile filename WriteMode
         -- dunno if I need to set the buffering mode
         (_, _, _, ph) <-
           doIO $
@@ -87,18 +93,22 @@ addTask t =
                   std_out = UseHandle hFile,
                   std_err = UseHandle hFile
                 }
-        _ <- lift $ addTaskToState t ph
+        _ <- lift $ addTaskToState t filename ph
         return $ "Added task: " ++ tName t
-
--- menu :: IO Action
-
--- addTask :: Task -> IO ()
 
 -- showLogs :: Task -> IO ()
 
--- StateT Map IO ()
+runAction :: Action -> StateT [RunningTask] IO ()
+runAction (AddTask t) = do
+  result <- runExceptT $ addTask t
+  case result of
+    Left s -> lift $ putStrLn s
+    Right s -> lift $ putStrLn s
 
--- [Task] -> IO ()
+loop :: StateT [RunningTask] IO ()
+loop =
+  do
+    loop
 
 main :: IO ()
 main = do
