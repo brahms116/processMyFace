@@ -4,11 +4,11 @@ cabal-version: 2.2
 --
 -- see: https://github.com/sol/hpack
 
-name:           threadMyFace
+name:           processMyFace
 version:        0.1.0.0
 description:    Please see the README on GitHub at <https://github.com/githubuser/threadMyFace#readme>
-homepage:       https://github.com/githubuser/threadMyFace#readme
-bug-reports:    https://github.com/githubuser/threadMyFace/issues
+homepage:       https://github.com/brahms116/processMyFace#readme
+bug-reports:    https://github.com/brahms116/processMyFace/issues
 author:         Author name here
 maintainer:     example@example.com
 copyright:      2023 Author name here
@@ -21,14 +21,14 @@ extra-source-files:
 
 source-repository head
   type: git
-  location: https://github.com/githubuser/threadMyFace
+  location: https://github.com/brahms116/processMyFace
 
-executable threadMyFace-exe
+executable processMyFace-exe
   main-is: Main.hs
   other-modules:
-      Paths_threadMyFace
+      Paths_processMyFace
   autogen-modules:
-      Paths_threadMyFace
+      Paths_processMyFace
   hs-source-dirs:
       app
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N

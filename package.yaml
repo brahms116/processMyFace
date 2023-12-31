@@ -1,6 +1,6 @@
-name:                threadMyFace
+name:                processMyFace
 version:             0.1.0.0
-github:              "githubuser/threadMyFace"
+github:              "brahms116/processMyFace"
 license:             BSD-3-Clause
 author:              "Author name here"
 maintainer:          "example@example.com"
@@ -37,7 +37,7 @@ ghc-options:
 - -Wredundant-constraints
 
 executables:
-  threadMyFace-exe:
+  processMyFace-exe:
     main:                Main.hs
     source-dirs:         app
     ghc-options:
