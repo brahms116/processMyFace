@@ -2,12 +2,9 @@ module Main (main) where
 
 import Control.Concurrent
 import Control.Monad.Except
-import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.State.Lazy
-import Data.Bifunctor (Bifunctor (bimap))
 import Data.List (find)
 import Data.Maybe (isJust)
-import System.Environment
 import System.IO
 import System.Process
 
@@ -163,49 +160,3 @@ loop =
 
 main :: IO ()
 main = void $ runStateT loop []
-
--- main = do
--- args <- pTask <$> getArgs
--- hFile <- openFile ("/tmp/" ++ tName args) WriteMode
--- hSetBuffering hFile NoBuffering
--- hPutStr hFile ""
--- (_, Just mout, _, _) <-
---   createProcess
---     (shell (tCommand args))
---       { cwd = Just $ tCwd args,
---         std_in = CreatePipe,
---         std_out = CreatePipe,
---         delegate_ctlc = False
---       }
--- contents <- hGetContents mout
--- hPutStr hFile contents
--- (_, _, _, _) <-
---   createProcess
---     -- (shell (tCommand args ++ " > /tmp/" ++ tName args ++ " 2>&1"))
---     (shell (tCommand args))
---       { cwd = Just $ tCwd args,
---         std_out = UseHandle hFile,
---         std_err = UseHandle hFile
---       }
--- (_, Just mout, _, _) <-
---   createProcess
---     (shell ("tail -f /tmp/" ++ tName args))
---       { std_out = CreatePipe,
---         std_in = CreatePipe,
---         delegate_ctlc = False
---       }
--- loop mout
-
--- loop :: Handle -> IO ()
--- loop h = do
---   isReady <- hReady h
---   threadDelay 100000
---   putStrLn "check"
---   if isReady
---     then recurse
---     else loop h
---   where
---     recurse = do
---       line <- hGetLine h
---       putStrLn line
---       loop h
