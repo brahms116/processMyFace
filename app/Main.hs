@@ -4,6 +4,9 @@ import Control.Concurrent
 import Control.Monad.Except
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.State.Lazy
+import Data.Bifunctor (Bifunctor (bimap))
+import Data.List (find)
+import Data.Maybe (isJust)
 import System.Environment
 import System.IO
 import System.Process
@@ -26,7 +29,7 @@ data RunningTask = RunningTask
 instance Show RunningTask where
   show = rtName
 
-data Action = AddTask Task deriving (Show)
+data Action = AddTask Task | LogTask String deriving (Show)
 
 pTask :: String -> Either String Task
 pTask s = case words s of
@@ -39,6 +42,8 @@ pAction s =
     ("add" : ws) -> do
       t <- pTask $ unwords ws
       return $ AddTask t
+    -- better parse name here
+    ("log" : name : _) -> Right $ LogTask name
     _ -> Left "Invalid command"
 
 prompt :: IO Action
@@ -96,7 +101,47 @@ addTask t =
         _ <- lift $ addTaskToState t filename ph
         return $ "Added task: " ++ tName t
 
--- showLogs :: Task -> IO ()
+showLogs :: RunningTask -> IO ()
+showLogs (RunningTask _ _ _ _ p) =
+  let cmd = shell ("tail -f " ++ p)
+   in do
+        (_, Just mout, _, ph) <-
+          createProcess
+            cmd
+              { std_out = CreatePipe,
+                delegate_ctlc = False
+              }
+        mVar <- newEmptyMVar
+        _ <- forkIO $ waitForQ mVar
+        _ <- logLoop mout mVar
+        terminateProcess ph
+
+waitForQ :: MVar Bool -> IO ()
+waitForQ mVar = do
+  hSetBuffering stdin NoBuffering
+  c <- getChar
+  if c == 'q'
+    then putMVar mVar True
+    else waitForQ mVar
+
+logLoop :: Handle -> MVar Bool -> IO ()
+logLoop h m =
+  let quit = isJust <$> tryTakeMVar m
+   in do
+        quit' <- quit
+        if quit'
+          then return ()
+          else do
+            isReady <- hReady h
+            threadDelay 10000
+            if isReady
+              then recurse
+              else logLoop h m
+  where
+    recurse = do
+      line <- hGetLine h
+      putStrLn line
+      logLoop h m
 
 runAction :: Action -> StateT [RunningTask] IO ()
 runAction (AddTask t) = do
@@ -104,16 +149,20 @@ runAction (AddTask t) = do
   case result of
     Left s -> lift $ putStrLn s
     Right s -> lift $ putStrLn s
+runAction (LogTask n) =
+  let f x = rtName x == n
+   in do
+        mTask <- find f <$> get
+        case mTask of
+          Nothing -> lift $ putStrLn "No such task!"
+          Just ts -> lift $ showLogs ts
 
 loop :: StateT [RunningTask] IO ()
 loop =
-  do
-    loop
+  menu >>= runAction >> loop
 
 main :: IO ()
-main = do
-  huh <- runStateT menu []
-  print huh
+main = void $ runStateT loop []
 
 -- main = do
 -- args <- pTask <$> getArgs
