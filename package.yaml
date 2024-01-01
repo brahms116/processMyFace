@@ -39,7 +39,7 @@ ghc-options:
 - -Wredundant-constraints
 
 executables:
-  processMyFace-exe:
+  processMyFace:
     main:                Main.hs
     source-dirs:         app
     ghc-options:

@@ -23,7 +23,7 @@ source-repository head
   type: git
   location: https://github.com/brahms116/processMyFace
 
-executable processMyFace-exe
+executable processMyFace
   main-is: Main.hs
   other-modules:
       Paths_processMyFace

@@ -8,7 +8,6 @@ import Control.Monad.Trans.Maybe
 import Control.Monad.Trans.State.Lazy
 import Data.Aeson
 import Data.ByteString.Lazy.Char8 (pack)
-import Data.Foldable (traverse_)
 import Data.List (find, transpose)
 import Data.Maybe (fromMaybe, isJust)
 import System.Environment (getArgs)
@@ -76,12 +75,23 @@ pAction s =
       t <- pTask $ unwords ws
       return $ AddTask t
     -- better parse name here
-    ("log" : name : _) -> Right $ LogTask name
+    ("logs" : name : _) -> Right $ LogTask name
     _ -> Left "Invalid command"
+
+promptText :: String
+promptText =
+  unlines
+    [ "Available commands:",
+      "======================",
+      "- 'logs <TASK_NAME>', see the live tail of logs from <TASK_NAME>, press 'q' then to return to this menu",
+      "",
+      "",
+      "Enter your command, then hit <ENTER>"
+    ]
 
 prompt :: IO Action
 prompt = do
-  putStrLn "Enter your command: "
+  putStrLn promptText
   a <- pAction <$> getLine
   case a of
     Right action -> return action
@@ -205,7 +215,7 @@ runAction (AddTask t) = do
   result <- runExceptT $ addTask t
   case result of
     Left s -> lift $ putStrLn s
-    Right s -> lift $ putStrLn s
+    Right _ -> return ()
 runAction (LogTask n) = do
   result <- runExceptT $ showLogs n
   case result of
@@ -240,7 +250,7 @@ app :: ApplicationContext ()
 app =
   let handleResult x = case x of
         Left s -> putStrLn s
-        Right ss -> traverse_ putStrLn ss
+        Right _ -> return ()
    in do
         JsonTasks ts <- lift $ fromMaybe (JsonTasks []) <$> runMaybeT tasksFromArg
         result <- runExceptT $ traverse (addTask . taskFromJsonTask) ts
