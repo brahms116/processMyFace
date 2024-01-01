@@ -1,10 +1,17 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 module Main (main) where
 
 import Control.Concurrent
 import Control.Monad.Except
+import Control.Monad.Trans.Maybe
 import Control.Monad.Trans.State.Lazy
+import Data.Aeson
+import Data.ByteString.Lazy.Char8 (pack)
+import Data.Foldable (traverse_)
 import Data.List (find)
-import Data.Maybe (isJust)
+import Data.Maybe (fromMaybe, isJust)
+import System.Environment (getArgs)
 import System.IO
 import System.Process
 
@@ -22,6 +29,26 @@ data RunningTask = RunningTask
     rtPh :: ProcessHandle,
     rtFp :: String
   }
+
+data JsonTask = JsonTask
+  { jtName :: String,
+    jtCommand :: String,
+    jtCwd :: Maybe String
+  }
+
+newtype JsonTasks = JsonTasks [JsonTask]
+
+instance FromJSON JsonTask where
+  parseJSON = withObject "JsonTask" $ \v -> do
+    name <- v .: "name"
+    command <- v .: "command"
+    d <- v .:? "cwd"
+    return $ JsonTask name command d
+
+instance FromJSON JsonTasks where
+  parseJSON = withObject "JsonTasks" $ \v -> do
+    tasks <- v .: "tasks"
+    return $ JsonTasks tasks
 
 instance Show RunningTask where
   show = rtName
@@ -127,7 +154,7 @@ waitForQ mVar = do
   hSetBuffering stdin NoBuffering
   c <- getChar
   if c == 'q'
-    then putMVar mVar True
+    then hSetBuffering stdin (BlockBuffering Nothing) >> putMVar mVar True
     else waitForQ mVar
 
 logLoop :: Handle -> MVar Bool -> IO ()
@@ -161,9 +188,40 @@ runAction (LogTask n) = do
     Left s -> lift $ putStrLn s
     Right _ -> return ()
 
+parseJsonTasks :: String -> Either String JsonTasks
+parseJsonTasks = eitherDecode . pack
+
+getDefinedTasks :: String -> MaybeT IO JsonTasks
+getDefinedTasks p = MaybeT $ do
+  r <- parseJsonTasks <$> readFile p
+  case r of
+    Left str -> putStrLn str >> return Nothing
+    Right ts -> return $ Just ts
+
+tasksFromArg :: MaybeT IO JsonTasks
+tasksFromArg = do
+  args <- lift getArgs
+  case args of
+    (p : _) -> getDefinedTasks p
+    _ -> MaybeT $ return Nothing
+
 loop :: ApplicationContext ()
 loop =
   menu >>= runAction >> loop
 
+taskFromJsonTask :: JsonTask -> Task
+taskFromJsonTask (JsonTask name cmd d) = Task name cmd $ fromMaybe "." d
+
+app :: ApplicationContext ()
+app =
+  let handleResult x = case x of
+        Left s -> putStrLn s
+        Right ss -> traverse_ putStrLn ss
+   in do
+        JsonTasks ts <- lift $ fromMaybe (JsonTasks []) <$> runMaybeT tasksFromArg
+        result <- runExceptT $ traverse (addTask . taskFromJsonTask) ts
+        _ <- lift $ handleResult result
+        loop
+
 main :: IO ()
-main = void $ runStateT loop []
+main = void $ runStateT app []
