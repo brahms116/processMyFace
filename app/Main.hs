@@ -9,7 +9,7 @@ import Control.Monad.Trans.State.Lazy
 import Data.Aeson
 import Data.ByteString.Lazy.Char8 (pack)
 import Data.Foldable (traverse_)
-import Data.List (find)
+import Data.List (find, transpose)
 import Data.Maybe (fromMaybe, isJust)
 import System.Environment (getArgs)
 import System.IO
@@ -57,6 +57,13 @@ data Action = AddTask Task | LogTask String deriving (Show)
 
 type ApplicationContext = StateT [RunningTask] IO
 
+prettyTable :: [[String]] -> String
+prettyTable ss =
+  let ss' = transpose ss
+      widths = (maximum . (length <$>) <$> ss')
+      fixed = [[x ++ replicate (i + 4 - length x) ' ' | (x, i) <- zip y widths] | y <- ss]
+   in unlines $ unwords <$> fixed
+
 pTask :: String -> Either String Task
 pTask s = case words s of
   [name, cmd, d] -> Right $ Task {tName = name, tCommand = cmd, tCwd = d}
@@ -80,10 +87,27 @@ prompt = do
     Right action -> return action
     Left str -> putStrLn str >> prompt
 
+taskTableRow :: RunningTask -> [String]
+taskTableRow (RunningTask name cmd d _ lp) = [name, cmd, d, lp]
+
+taskTable :: [RunningTask] -> [[String]]
+taskTable rts = ["Name:", "Command:", "Directory:", "Log file path"] : (taskTableRow <$> rts)
+
+prettyMenu :: [RunningTask] -> String
+prettyMenu ts =
+  unlines
+    [ "",
+      "",
+      "",
+      "Running Tasks",
+      "=============="
+    ]
+    ++ prettyTable (taskTable ts)
+
 menu :: StateT [RunningTask] IO Action
 menu = do
   cur <- get
-  lift $ print cur
+  lift $ putStrLn $ prettyMenu cur
   lift prompt
 
 validateTask :: Task -> [RunningTask] -> Either String ()
