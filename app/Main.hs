@@ -28,6 +28,8 @@ instance Show RunningTask where
 
 data Action = AddTask Task | LogTask String deriving (Show)
 
+type ApplicationContext = StateT [RunningTask] IO
+
 pTask :: String -> Either String Task
 pTask s = case words s of
   [name, cmd, d] -> Right $ Task {tName = name, tCommand = cmd, tCwd = d}
@@ -63,28 +65,27 @@ validateTask t ts =
       dup = any (\x -> name == rtName x) ts
    in when dup $ Left $ "Duplicate task name: " ++ name
 
-runValidateTask :: Task -> ExceptT String (StateT [RunningTask] IO) ()
-runValidateTask t = do
+validateTaskInCtx :: Task -> ExceptT String ApplicationContext ()
+validateTaskInCtx t = do
   ts <- lift get
   case validateTask t ts of
     Left err -> throwError err
     Right _ -> return ()
 
-addTaskToState :: (Monad a) => Task -> String -> ProcessHandle -> StateT [RunningTask] a ()
-addTaskToState (Task name command d) fp ph =
+addTaskToCtx :: Task -> String -> ProcessHandle -> ApplicationContext ()
+addTaskToCtx (Task name command d) fp ph =
   let rt = RunningTask {rtFp = fp, rtPh = ph, rtName = name, rtCommand = command, rtCwd = d}
    in do
-        -- explore why a has to be a monad?
         cur <- get
         put $ rt : cur
 
-addTask :: Task -> ExceptT String (StateT [RunningTask] IO) String
+addTask :: Task -> ExceptT String ApplicationContext String
 addTask t =
   let doIO = lift . lift
       command = shell (tCommand t)
       filename = "/tmp/" ++ tName t
    in do
-        _ <- runValidateTask t
+        _ <- validateTaskInCtx t
         hFile <- doIO $ openFile filename WriteMode
         -- dunno if I need to set the buffering mode
         (_, _, _, ph) <-
@@ -95,11 +96,19 @@ addTask t =
                   std_out = UseHandle hFile,
                   std_err = UseHandle hFile
                 }
-        _ <- lift $ addTaskToState t filename ph
+        _ <- lift $ addTaskToCtx t filename ph
         return $ "Added task: " ++ tName t
 
-showLogs :: RunningTask -> IO ()
-showLogs (RunningTask _ _ _ _ p) =
+showLogs :: String -> ExceptT String ApplicationContext ()
+showLogs n = do
+  ts <- lift get
+  let f x = rtName x == n
+  case find f ts of
+    Nothing -> throwError $ "No such task: " ++ n
+    Just ts' -> lift . lift $ showLogForTask ts'
+
+showLogForTask :: RunningTask -> IO ()
+showLogForTask (RunningTask _ _ _ _ p) =
   let cmd = shell ("tail -f " ++ p)
    in do
         (_, Just mout, _, ph) <-
@@ -140,21 +149,19 @@ logLoop h m =
       putStrLn line
       logLoop h m
 
-runAction :: Action -> StateT [RunningTask] IO ()
+runAction :: Action -> ApplicationContext ()
 runAction (AddTask t) = do
   result <- runExceptT $ addTask t
   case result of
     Left s -> lift $ putStrLn s
     Right s -> lift $ putStrLn s
-runAction (LogTask n) =
-  let f x = rtName x == n
-   in do
-        mTask <- find f <$> get
-        case mTask of
-          Nothing -> lift $ putStrLn "No such task!"
-          Just ts -> lift $ showLogs ts
+runAction (LogTask n) = do
+  result <- runExceptT $ showLogs n
+  case result of
+    Left s -> lift $ putStrLn s
+    Right _ -> return ()
 
-loop :: StateT [RunningTask] IO ()
+loop :: ApplicationContext ()
 loop =
   menu >>= runAction >> loop
 
