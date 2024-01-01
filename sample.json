@@ -2,14 +2,14 @@
   "tasks": [
     {
       "command": "./local.sh",
-      "cwd": "~/dev/pastureen_mono/rust/blog_skeleton",
+      "cwd": "../pastureen_mono/rust/blog_skeleton",
       "name": "blog_skeleton"
     },
     {
       "command": "./local.sh",
-      "cwd": "~/dev/pastureen_mono/rust/blog_htmx",
+      "cwd": "../pastureen_mono/rust/blog_htmx",
       "name": "blog_htmx"
-    }
+    },
     {
       "command": "echo 'hello world'",
       "name": "hello_world"
