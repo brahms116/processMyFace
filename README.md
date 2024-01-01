@@ -40,6 +40,6 @@ processMyFace ./path/to/json/file.json
 
 ## Caveats
 
-For demo and personal use, not very refined, only works on MacOs currently I think.
+For demo and personal use, not very refined, very hacky, uses a log file to store the stdout of processes, so please don't blow out your storage by having lots of stdout. Only works on MacOs currently I think :(
 
 
