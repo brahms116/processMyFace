@@ -1,9 +1,16 @@
+Practise project in haskell
+
 # ProcessMyFace
 
 A quick and primitive utility to run multiple shell commands in parrallel 
 and inspect their stdout logs.
 
 ![demo](./demo.png)
+
+
+## How to install
+
+I dunno.
 
 ## How to use
 
@@ -34,3 +41,5 @@ processMyFace ./path/to/json/file.json
 ## Caveats
 
 For demo and personal use, not very refined, only works on MacOs currently I think.
+
+
