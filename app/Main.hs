@@ -172,7 +172,7 @@ showLogs n = do
 
 showLogForTask :: RunningTask -> IO ()
 showLogForTask (RunningTask _ _ _ _ p) =
-  let cmd = shell ("tail -f " ++ p)
+  let cmd = shell ("tail -f  -n +1 " ++ p)
    in do
         (_, Just mout, _, ph) <-
           createProcess
