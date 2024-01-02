@@ -154,6 +154,8 @@ addTask t =
             createProcess
               command
                 { cwd = Just $ tCwd t,
+                  std_in = CreatePipe,
+                  delegate_ctlc = False,
                   std_out = UseHandle hFile,
                   std_err = UseHandle hFile
                 }
@@ -176,7 +178,8 @@ showLogForTask (RunningTask _ _ _ _ p) =
           createProcess
             cmd
               { std_out = CreatePipe,
-                delegate_ctlc = False
+                delegate_ctlc = False,
+                std_in = CreatePipe
               }
         mVar <- newEmptyMVar
         _ <- forkIO $ waitForQ mVar
