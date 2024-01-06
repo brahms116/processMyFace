@@ -179,12 +179,13 @@ showLogForTask (RunningTask _ _ _ _ p) =
         terminateProcess ph
 
 waitForQ :: MVar Bool -> IO ()
-waitForQ mVar = do
+waitForQ mVar =
   hSetBuffering stdin NoBuffering
-  c <- getChar
-  if c == 'q'
-    then hSetBuffering stdin (BlockBuffering Nothing) >> putMVar mVar True
-    else waitForQ mVar
+    >> getChar
+    >>= \c ->
+      if c == 'q'
+        then hSetBuffering stdin (BlockBuffering Nothing) >> putMVar mVar True
+        else waitForQ mVar
 
 logLoop :: Handle -> MVar Bool -> IO ()
 logLoop h m =
