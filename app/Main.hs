@@ -14,6 +14,7 @@ import Data.Maybe (fromMaybe, isJust)
 import System.Environment (getArgs)
 import System.IO
 import System.Process
+import System.Exit (exitSuccess)
 
 data Task = Task
   { tName :: String,
@@ -53,7 +54,7 @@ instance FromJSON JsonTasks where
 instance Show RunningTask where
   show = rtName
 
-data Action = AddTask Task | LogTask String deriving (Show)
+data Action = AddTask Task | LogTask String | Exit deriving (Show)
 
 type ApplicationContext = StateT [RunningTask] IO
 
@@ -77,6 +78,7 @@ pAction s =
       return $ AddTask t
     -- better parse name here
     ("logs" : name : _) -> Right $ LogTask name
+    ("exit" : _) -> Right Exit
     _ -> Left "Invalid command"
 
 promptText :: String
@@ -217,6 +219,7 @@ runAction (LogTask n) = do
   case result of
     Left s -> lift $ putStrLn s
     Right _ -> return ()
+runAction Exit = lift exitSuccess -- TODO kill children before exiting
 
 parseJsonTasks :: String -> Either String JsonTasks
 parseJsonTasks = eitherDecode . pack
