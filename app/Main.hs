@@ -1,3 +1,4 @@
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 module Main (main) where
@@ -90,10 +91,8 @@ promptText =
     ]
 
 prompt :: IO Action
-prompt = do
-  putStrLn promptText
-  a <- pAction <$> getLine
-  case a of
+prompt =
+  putStrLn promptText >> pAction <$> getLine >>= \case
     Right action -> return action
     Left str -> putStrLn str >> prompt
 
@@ -124,9 +123,8 @@ validateTask t ts =
    in when dup $ Left $ "Duplicate task name: " ++ name
 
 validateTaskInCtx :: Task -> ExceptT String ApplicationContext ()
-validateTaskInCtx t = do
-  ts <- lift get
-  case validateTask t ts of
+validateTaskInCtx t =
+  lift get >>= \ts -> case validateTask t ts of
     Left err -> throwError err
     Right _ -> return ()
 
@@ -158,12 +156,11 @@ addTask t =
         return $ "Added task: " ++ tName t
 
 showLogs :: String -> ExceptT String ApplicationContext ()
-showLogs n = do
-  ts <- lift get
+showLogs n =
   let f x = rtName x == n
-  case find f ts of
-    Nothing -> throwError $ "No such task: " ++ n
-    Just ts' -> lift . lift $ showLogForTask ts'
+   in lift get >>= \ts -> case find f ts of
+        Nothing -> throwError $ "No such task: " ++ n
+        Just ts' -> lift . lift $ showLogForTask ts'
 
 showLogForTask :: RunningTask -> IO ()
 showLogForTask (RunningTask _ _ _ _ p) =
