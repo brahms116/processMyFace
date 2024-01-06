@@ -1,3 +1,4 @@
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 module Main (main) where
@@ -90,10 +91,8 @@ promptText =
     ]
 
 prompt :: IO Action
-prompt = do
-  putStrLn promptText
-  a <- pAction <$> getLine
-  case a of
+prompt =
+  putStrLn promptText >> pAction <$> getLine >>= \case
     Right action -> return action
     Left str -> putStrLn str >> prompt
 
@@ -115,10 +114,7 @@ prettyMenu ts =
     ++ prettyTable (taskTable ts)
 
 menu :: StateT [RunningTask] IO Action
-menu = do
-  cur <- get
-  lift $ putStrLn $ prettyMenu cur
-  lift prompt
+menu = (get >>= lift . putStrLn . prettyMenu) >> lift prompt
 
 validateTask :: Task -> [RunningTask] -> Either String ()
 validateTask t ts =
@@ -127,18 +123,15 @@ validateTask t ts =
    in when dup $ Left $ "Duplicate task name: " ++ name
 
 validateTaskInCtx :: Task -> ExceptT String ApplicationContext ()
-validateTaskInCtx t = do
-  ts <- lift get
-  case validateTask t ts of
+validateTaskInCtx t =
+  lift get >>= \ts -> case validateTask t ts of
     Left err -> throwError err
     Right _ -> return ()
 
 addTaskToCtx :: Task -> String -> ProcessHandle -> ApplicationContext ()
 addTaskToCtx (Task name command d) fp ph =
   let rt = RunningTask {rtFp = fp, rtPh = ph, rtName = name, rtCommand = command, rtCwd = d}
-   in do
-        cur <- get
-        put $ rt : cur
+   in get >>= put . (rt :)
 
 addTask :: Task -> ExceptT String ApplicationContext String
 addTask t =
@@ -163,12 +156,11 @@ addTask t =
         return $ "Added task: " ++ tName t
 
 showLogs :: String -> ExceptT String ApplicationContext ()
-showLogs n = do
-  ts <- lift get
+showLogs n =
   let f x = rtName x == n
-  case find f ts of
-    Nothing -> throwError $ "No such task: " ++ n
-    Just ts' -> lift . lift $ showLogForTask ts'
+   in lift get >>= \ts -> case find f ts of
+        Nothing -> throwError $ "No such task: " ++ n
+        Just ts' -> lift . lift $ showLogForTask ts'
 
 showLogForTask :: RunningTask -> IO ()
 showLogForTask (RunningTask _ _ _ _ p) =
@@ -187,12 +179,13 @@ showLogForTask (RunningTask _ _ _ _ p) =
         terminateProcess ph
 
 waitForQ :: MVar Bool -> IO ()
-waitForQ mVar = do
+waitForQ mVar =
   hSetBuffering stdin NoBuffering
-  c <- getChar
-  if c == 'q'
-    then hSetBuffering stdin (BlockBuffering Nothing) >> putMVar mVar True
-    else waitForQ mVar
+    >> getChar
+    >>= \c ->
+      if c == 'q'
+        then hSetBuffering stdin (BlockBuffering Nothing) >> putMVar mVar True
+        else waitForQ mVar
 
 logLoop :: Handle -> MVar Bool -> IO ()
 logLoop h m =
@@ -203,7 +196,7 @@ logLoop h m =
           then return ()
           else do
             isReady <- hReady h
-            threadDelay 10000
+            threadDelay 100
             if isReady
               then recurse
               else logLoop h m
