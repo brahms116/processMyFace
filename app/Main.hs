@@ -115,10 +115,7 @@ prettyMenu ts =
     ++ prettyTable (taskTable ts)
 
 menu :: StateT [RunningTask] IO Action
-menu = do
-  cur <- get
-  lift $ putStrLn $ prettyMenu cur
-  lift prompt
+menu = (get >>= lift . putStrLn . prettyMenu) >> lift prompt
 
 validateTask :: Task -> [RunningTask] -> Either String ()
 validateTask t ts =
@@ -136,9 +133,7 @@ validateTaskInCtx t = do
 addTaskToCtx :: Task -> String -> ProcessHandle -> ApplicationContext ()
 addTaskToCtx (Task name command d) fp ph =
   let rt = RunningTask {rtFp = fp, rtPh = ph, rtName = name, rtCommand = command, rtCwd = d}
-   in do
-        cur <- get
-        put $ rt : cur
+   in get >>= put . (rt :)
 
 addTask :: Task -> ExceptT String ApplicationContext String
 addTask t =
@@ -203,7 +198,7 @@ logLoop h m =
           then return ()
           else do
             isReady <- hReady h
-            threadDelay 10000
+            threadDelay 100
             if isReady
               then recurse
               else logLoop h m
