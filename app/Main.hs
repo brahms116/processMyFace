@@ -170,12 +170,15 @@ addTask t =
         _ <- lift $ addTaskToCtx t filename ph
         return $ "Added task: " ++ tName t
 
-showLogs :: String -> ExceptT String ApplicationContext ()
-showLogs n =
-  let f x = rtName x == n
+findTaskRun :: (RunningTask -> ApplicationContext ()) -> String -> ExceptT String ApplicationContext ()
+findTaskRun toRun name =
+  let f x = rtName x == name
    in lift get >>= \ts -> case find f ts of
-        Nothing -> throwError $ "No such task: " ++ n
-        Just ts' -> lift . lift $ showLogForTask ts'
+        Nothing -> throwError $ "No such task: " ++ name
+        Just t -> lift $ toRun t
+
+showLogs :: String -> ExceptT String ApplicationContext ()
+showLogs = findTaskRun $ lift . showLogForTask
 
 showLogForTask :: RunningTask -> IO ()
 showLogForTask (RunningTask _ _ _ _ p) =
@@ -194,18 +197,14 @@ showLogForTask (RunningTask _ _ _ _ p) =
         terminateProcess ph
 
 killTask :: String -> ExceptT String ApplicationContext ()
-killTask n =
-  let f x = rtName x == n
-   in lift get >>= \ts -> case find f ts of
-        Nothing -> throwError $ "No such task: " ++ n
-        Just t -> lift . lift $ do
-          code <-
-            terminateProcess (rtPh t)
-              >> threadDelay 1000
-              >> getProcessExitCode (rtPh t)
-          case code of
-            Nothing -> putStrLn "Failed to kill process"
-            Just c -> putStrLn $ "Exited with code " ++ exitCodeStr c
+killTask = findTaskRun $ \t -> lift $ do
+  code <-
+    terminateProcess (rtPh t)
+      >> threadDelay 1000
+      >> getProcessExitCode (rtPh t)
+  case code of
+    Nothing -> putStrLn "Failed to kill process"
+    Just c -> putStrLn $ "Exited with code " ++ exitCodeStr c
 
 waitForQ :: MVar Bool -> IO ()
 waitForQ mVar =
