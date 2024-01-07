@@ -11,10 +11,11 @@ import Data.Aeson
 import Data.ByteString.Lazy.Char8 (pack)
 import Data.Foldable (traverse_)
 import Data.List (find, transpose)
-import Data.Maybe (fromMaybe, isJust)
+import Data.Maybe (fromMaybe, isJust, isNothing)
 import System.Environment (getArgs)
 import System.Exit (ExitCode (..), exitSuccess)
 import System.IO
+import System.Posix.Signals
 import System.Process
 
 data Task = Task
@@ -119,12 +120,15 @@ prettyMenu exitCodes ts =
         cmd,
         d,
         lp,
-        maybe "RUNNING" (\x -> "[EXITED with code " ++ exitCodeStr x ++ "]") code
+        maybe "RUNNING" (\x -> "[" ++ exitCodeStr x ++ "]") code
       ]
 
+--
 exitCodeStr :: ExitCode -> String
-exitCodeStr ExitSuccess = "0"
-exitCodeStr (ExitFailure c) = show c
+exitCodeStr ExitSuccess = "EXITED with code 0"
+exitCodeStr (ExitFailure c)
+  | c > 0 = "EXITED with code " ++ show c
+  | otherwise = "TERMINATED by signal " ++ show (-c)
 
 menu :: StateT [RunningTask] IO Action
 menu = do
@@ -192,19 +196,33 @@ showLogForTask (RunningTask _ _ _ _ p) =
                 std_in = CreatePipe
               }
         mVar <- newEmptyMVar
-        _ <- forkIO $ waitForQ mVar
-        _ <- logLoop mout mVar
+        void . forkIO $ waitForQ mVar
+        logLoop mout mVar
         terminateProcess ph
 
+killAndWait :: RunningTask -> IO ()
+killAndWait task =
+  getPid (rtPh task) >>= \case
+    Nothing -> putStrLn "Process already terminated"
+    Just pid -> do
+      signalProcess sigINT pid
+      putStrLn ("Waiting for " ++ rtName task ++ " to terminate ['q' to quit]")
+      mVar <- newEmptyMVar
+      void . forkIO $ waitForQ mVar
+      waitWithExitKey mVar
+  where
+    waitWithExitKey :: MVar Bool -> IO ()
+    waitWithExitKey mVar =
+      getProcessExitCode (rtPh task) >>= \case
+        Nothing -> do
+          quit' <- isJust <$> tryTakeMVar mVar
+          if quit'
+            then putStr "\n" -- leave a space under the q
+            else threadDelay 100 >> waitWithExitKey mVar
+        Just code -> putStrLn . exitCodeStr $ code
+
 killTask :: String -> ExceptT String ApplicationContext ()
-killTask = findTaskRun $ \t -> lift $ do
-  code <-
-    terminateProcess (rtPh t)
-      >> threadDelay 1000
-      >> getProcessExitCode (rtPh t)
-  case code of
-    Nothing -> putStrLn "Failed to kill process"
-    Just c -> putStrLn $ "Exited with code " ++ exitCodeStr c
+killTask = findTaskRun $ lift . killAndWait
 
 waitForQ :: MVar Bool -> IO ()
 waitForQ mVar =
@@ -227,6 +245,9 @@ logLoop h m = do
         then hGetLine h >>= putStrLn >> logLoop h m
         else logLoop h m
 
+isRunning :: RunningTask -> IO Bool
+isRunning = fmap isNothing . getProcessExitCode . rtPh
+
 runAction :: Action -> ApplicationContext ()
 runAction (AddTask t) = do
   result <- runExceptT $ addTask t
@@ -241,19 +262,11 @@ runAction (Kill n) = do
   runExceptT (killTask n) >>= \case
     Left s -> lift $ putStrLn s
     Right _ -> return ()
-runAction Exit = do
-  runningTasks <- get
-  lift $ traverse_ (terminateProcess . rtPh) runningTasks >> threadDelay 1000
-  running <- lift $ traverse namePidPair runningTasks
-  case filter (isJust . snd) running of
-    [] -> pure ()
-    ts -> do
-      lift $ putStrLn "\nFAILED TO KILL:"
-      lift . putStrLn . prettyTable $
-        (\(name, pid) -> [name, maybe "" show pid]) <$> ts
-  lift exitSuccess
-  where
-    namePidPair task = (,) (rtName task) <$> getPid (rtPh task)
+runAction Exit =
+  get
+    >>= lift . filterM isRunning
+    >>= lift . traverse_ killAndWait
+    >> lift exitSuccess
 
 parseJsonTasks :: String -> Either String JsonTasks
 parseJsonTasks = eitherDecode . pack
