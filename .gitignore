@@ -1,2 +1,6 @@
 .stack-work/
 *~
+ghc-config
+ghcup-conf
+dist-newstyle
+test.json

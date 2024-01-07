@@ -9,9 +9,11 @@ import Control.Monad.Trans.Maybe
 import Control.Monad.Trans.State.Lazy
 import Data.Aeson
 import Data.ByteString.Lazy.Char8 (pack)
+import Data.Foldable (traverse_)
 import Data.List (find, transpose)
 import Data.Maybe (fromMaybe, isJust)
 import System.Environment (getArgs)
+import System.Exit (ExitCode (..), exitSuccess)
 import System.IO
 import System.Process
 
@@ -30,11 +32,7 @@ data RunningTask = RunningTask
     rtFp :: String
   }
 
-data JsonTask = JsonTask
-  { jtName :: String,
-    jtCommand :: String,
-    jtCwd :: Maybe String
-  }
+data JsonTask = JsonTask String String (Maybe String)
 
 newtype JsonTasks = JsonTasks [JsonTask]
 
@@ -53,7 +51,7 @@ instance FromJSON JsonTasks where
 instance Show RunningTask where
   show = rtName
 
-data Action = AddTask Task | LogTask String deriving (Show)
+data Action = AddTask Task | LogTask String | Kill String | Exit deriving (Show)
 
 type ApplicationContext = StateT [RunningTask] IO
 
@@ -77,6 +75,8 @@ pAction s =
       return $ AddTask t
     -- better parse name here
     ("logs" : name : _) -> Right $ LogTask name
+    ("kill" : name : _) -> Right $ Kill name
+    ("exit" : _) -> Right Exit
     _ -> Left "Invalid command"
 
 promptText :: String
@@ -85,6 +85,8 @@ promptText =
     [ "Available commands:",
       "======================",
       "- 'logs <TASK_NAME>', see the live tail of logs from <TASK_NAME>, press 'q' then to return to this menu",
+      "- 'kill <TASK_NAME>', kill the task <TASK_NAME> by sending SIGTERM",
+      "- 'exit', kill all child processes and exit",
       "",
       "",
       "Enter your command, then hit <ENTER>"
@@ -96,14 +98,8 @@ prompt =
     Right action -> return action
     Left str -> putStrLn str >> prompt
 
-taskTableRow :: RunningTask -> [String]
-taskTableRow (RunningTask name cmd d _ lp) = [name, cmd, d, lp]
-
-taskTable :: [RunningTask] -> [[String]]
-taskTable rts = ["Name:", "Command:", "Directory:", "Log file path"] : (taskTableRow <$> rts)
-
-prettyMenu :: [RunningTask] -> String
-prettyMenu ts =
+prettyMenu :: [Maybe ExitCode] -> [RunningTask] -> String
+prettyMenu exitCodes ts =
   unlines
     [ "",
       "",
@@ -111,10 +107,29 @@ prettyMenu ts =
       "Running Tasks",
       "=============="
     ]
-    ++ prettyTable (taskTable ts)
+    ++ prettyTable taskTable
+  where
+    taskTable =
+      ["Name:", "Command:", "Directory:", "Log file path", "Status"]
+        : (uncurry taskTableRow <$> zip ts exitCodes)
+
+    taskTableRow :: RunningTask -> Maybe ExitCode -> [String]
+    taskTableRow (RunningTask name cmd d _ lp) code =
+      [ name,
+        cmd,
+        d,
+        lp,
+        maybe "RUNNING" (\x -> "[EXITED with code " ++ exitCodeStr x ++ "]") code
+      ]
+
+exitCodeStr :: ExitCode -> String
+exitCodeStr ExitSuccess = "0"
+exitCodeStr (ExitFailure c) = show c
 
 menu :: StateT [RunningTask] IO Action
-menu = (get >>= lift . putStrLn . prettyMenu) >> lift prompt
+menu = do
+  exitCodes <- gets (map rtPh) >>= lift . traverse getProcessExitCode
+  (get >>= lift . putStrLn . prettyMenu exitCodes) >> lift prompt
 
 validateTask :: Task -> [RunningTask] -> Either String ()
 validateTask t ts =
@@ -155,12 +170,15 @@ addTask t =
         _ <- lift $ addTaskToCtx t filename ph
         return $ "Added task: " ++ tName t
 
-showLogs :: String -> ExceptT String ApplicationContext ()
-showLogs n =
-  let f x = rtName x == n
+findTaskRun :: (RunningTask -> ApplicationContext ()) -> String -> ExceptT String ApplicationContext ()
+findTaskRun toRun name =
+  let f x = rtName x == name
    in lift get >>= \ts -> case find f ts of
-        Nothing -> throwError $ "No such task: " ++ n
-        Just ts' -> lift . lift $ showLogForTask ts'
+        Nothing -> throwError $ "No such task: " ++ name
+        Just t -> lift $ toRun t
+
+showLogs :: String -> ExceptT String ApplicationContext ()
+showLogs = findTaskRun $ lift . showLogForTask
 
 showLogForTask :: RunningTask -> IO ()
 showLogForTask (RunningTask _ _ _ _ p) =
@@ -178,6 +196,16 @@ showLogForTask (RunningTask _ _ _ _ p) =
         _ <- logLoop mout mVar
         terminateProcess ph
 
+killTask :: String -> ExceptT String ApplicationContext ()
+killTask = findTaskRun $ \t -> lift $ do
+  code <-
+    terminateProcess (rtPh t)
+      >> threadDelay 1000
+      >> getProcessExitCode (rtPh t)
+  case code of
+    Nothing -> putStrLn "Failed to kill process"
+    Just c -> putStrLn $ "Exited with code " ++ exitCodeStr c
+
 waitForQ :: MVar Bool -> IO ()
 waitForQ mVar =
   hSetBuffering stdin NoBuffering
@@ -188,23 +216,16 @@ waitForQ mVar =
         else waitForQ mVar
 
 logLoop :: Handle -> MVar Bool -> IO ()
-logLoop h m =
-  let quit = isJust <$> tryTakeMVar m
-   in do
-        quit' <- quit
-        if quit'
-          then return ()
-          else do
-            isReady <- hReady h
-            threadDelay 100
-            if isReady
-              then recurse
-              else logLoop h m
-  where
-    recurse = do
-      line <- hGetLine h
-      putStrLn line
-      logLoop h m
+logLoop h m = do
+  quit' <- isJust <$> tryTakeMVar m
+  if quit'
+    then return ()
+    else do
+      isReady <- hReady h
+      threadDelay 100
+      if isReady
+        then hGetLine h >>= putStrLn >> logLoop h m
+        else logLoop h m
 
 runAction :: Action -> ApplicationContext ()
 runAction (AddTask t) = do
@@ -213,10 +234,26 @@ runAction (AddTask t) = do
     Left s -> lift $ putStrLn s
     Right _ -> return ()
 runAction (LogTask n) = do
-  result <- runExceptT $ showLogs n
-  case result of
+  runExceptT (showLogs n) >>= \case
     Left s -> lift $ putStrLn s
     Right _ -> return ()
+runAction (Kill n) = do
+  runExceptT (killTask n) >>= \case
+    Left s -> lift $ putStrLn s
+    Right _ -> return ()
+runAction Exit = do
+  runningTasks <- get
+  lift $ traverse_ (terminateProcess . rtPh) runningTasks >> threadDelay 1000
+  running <- lift $ traverse namePidPair runningTasks
+  case filter (isJust . snd) running of
+    [] -> pure ()
+    ts -> do
+      lift $ putStrLn "\nFAILED TO KILL:"
+      lift . putStrLn . prettyTable $
+        (\(name, pid) -> [name, maybe "" show pid]) <$> ts
+  lift exitSuccess
+  where
+    namePidPair task = (,) (rtName task) <$> getPid (rtPh task)
 
 parseJsonTasks :: String -> Either String JsonTasks
 parseJsonTasks = eitherDecode . pack
@@ -236,8 +273,7 @@ tasksFromArg = do
     _ -> MaybeT $ return Nothing
 
 loop :: ApplicationContext ()
-loop =
-  menu >>= runAction >> loop
+loop = (menu >>= runAction) >> loop
 
 taskFromJsonTask :: JsonTask -> Task
 taskFromJsonTask (JsonTask name cmd d) = Task name cmd $ fromMaybe "." d
@@ -246,11 +282,11 @@ app :: ApplicationContext ()
 app =
   let handleResult x = case x of
         Left s -> putStrLn s
-        Right _ -> return ()
+        Right _ -> pure ()
    in do
         JsonTasks ts <- lift $ fromMaybe (JsonTasks []) <$> runMaybeT tasksFromArg
         result <- runExceptT $ traverse (addTask . taskFromJsonTask) ts
-        _ <- lift $ handleResult result
+        lift $ handleResult result
         loop
 
 main :: IO ()
